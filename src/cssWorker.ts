@@ -7,7 +7,7 @@ import type { worker } from './fillers/monaco-editor-core';
 import * as cssService from 'vscode-css-languageservice';
 import { Options } from './monaco.contribution';
 
-export class CSSWorker {
+export class CSSInJSWorker {
 	// --- model sync -----------------------
 
 	private _ctx: worker.IWorkerContext;
@@ -29,7 +29,10 @@ export class CSSWorker {
 				customDataProviders.push(cssService.newCSSDataProvider(data.dataProviders[id]));
 			}
 		}
-		const lsOptions: cssService.LanguageServiceOptions = { customDataProviders, useDefaultDataProvider };
+		const lsOptions: cssService.LanguageServiceOptions = {
+			customDataProviders,
+			useDefaultDataProvider
+		};
 
 		switch (this._languageId) {
 			case 'css':
@@ -159,12 +162,12 @@ export class CSSWorker {
 		let models = this._ctx.getMirrorModels();
 		for (let model of models) {
 			if (model.uri.toString() === uri) {
-				return cssService.TextDocument.create(
-					uri,
-					this._languageId,
-					model.version,
-					model.getValue()
-				);
+				//  Wrap it around a selector, so that root-level statements will be considered valid
+				const value = `.this-element {
+					${model.getValue()}
+				   }`;
+
+				return cssService.TextDocument.create(uri, this._languageId, model.version, value);
 			}
 		}
 		return null;
@@ -173,9 +176,9 @@ export class CSSWorker {
 
 export interface ICreateData {
 	languageId: string;
-	options: Options
+	options: Options;
 }
 
-export function create(ctx: worker.IWorkerContext, createData: ICreateData): CSSWorker {
-	return new CSSWorker(ctx, createData);
+export function create(ctx: worker.IWorkerContext, createData: ICreateData): CSSInJSWorker {
+	return new CSSInJSWorker(ctx, createData);
 }

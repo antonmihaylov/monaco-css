@@ -4,8 +4,62 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as mode from './cssMode';
-import { languages, Emitter, IEvent } from './fillers/monaco-editor-core';
+import * as cssInJsLang from './cssInJsLang';
+import { language } from './cssInJsLang';
+import {
+	languages,
+	editor,
+	MarkerSeverity,
+	Uri,
+	IEvent,
+	Emitter,
+	Range
+} from './fillers/monaco-editor-core';
 
+//  Inject monaco editor and languages references at runtime instead of importing, because we don't want to import the css files
+export interface IEditorInjection {
+	createWebWorker: typeof editor.createWebWorker;
+	setModelMarkers: typeof editor.setModelMarkers;
+	onDidCreateModel: typeof editor.onDidCreateModel;
+	onWillDisposeModel: typeof editor.onWillDisposeModel;
+	onDidChangeModelLanguage: typeof editor.onDidChangeModelLanguage;
+	getModels: typeof editor.getModels;
+	getModel: typeof editor.getModel;
+	severities: Record<keyof typeof MarkerSeverity, MarkerSeverity>;
+	itemKinds: Record<keyof typeof languages.CompletionItemKind, languages.CompletionItemKind>;
+	CompletionItemInsertTextRule: Record<
+		keyof typeof languages.CompletionItemInsertTextRule,
+		languages.CompletionItemInsertTextRule
+	>;
+	Uri: typeof Uri;
+	Range: {
+		new (
+			startLineNumber: number,
+			startColumn: number,
+			endLineNumber: number,
+			endColumn: number
+		): Range;
+	};
+}
+
+export interface ILanguagesInjection {
+	setLanguageConfiguration: typeof languages.setLanguageConfiguration;
+	setMonarchTokensProvider: typeof languages.setMonarchTokensProvider;
+	registerCompletionItemProvider: typeof languages.registerCompletionItemProvider;
+	register: typeof languages.register;
+	registerHoverProvider: typeof languages.registerHoverProvider;
+	registerDocumentHighlightProvider: typeof languages.registerDocumentHighlightProvider;
+	registerDefinitionProvider: typeof languages.registerDefinitionProvider;
+	registerReferenceProvider: typeof languages.registerReferenceProvider;
+	registerDocumentSymbolProvider: typeof languages.registerDocumentSymbolProvider;
+	registerRenameProvider: typeof languages.registerRenameProvider;
+	registerColorProvider: typeof languages.registerColorProvider;
+	registerFoldingRangeProvider: typeof languages.registerFoldingRangeProvider;
+	registerSelectionRangeProvider: typeof languages.registerSelectionRangeProvider;
+	DocumentHighlightKind: typeof languages.DocumentHighlightKind;
+	SymbolKind: typeof languages.SymbolKind;
+	FoldingRangeKind: typeof languages.FoldingRangeKind;
+}
 export interface Options {
 	readonly validate?: boolean;
 	readonly lint?: {
@@ -112,19 +166,16 @@ export type DiagnosticsOptions = Options;
 // --- CSS configuration and defaults ---------
 
 class LanguageServiceDefaultsImpl implements LanguageServiceDefaults {
-	private _onDidChange = new Emitter<LanguageServiceDefaults>();
+	private _onDidChange: Emitter<LanguageServiceDefaults>;
 	private _options: Options;
 	private _modeConfiguration: ModeConfiguration;
 	private _languageId: string;
 
-	constructor(
-		languageId: string,
-		options: Options,
-		modeConfiguration: ModeConfiguration
-	) {
+	constructor(languageId: string, options: Options, modeConfiguration: ModeConfiguration) {
 		this._languageId = languageId;
 		this.setOptions(options);
 		this.setModeConfiguration(modeConfiguration);
+		this._onDidChange = new Emitter();
 	}
 
 	get onDidChange(): IEvent<LanguageServiceDefaults> {
@@ -216,28 +267,44 @@ export const lessDefaults: LanguageServiceDefaults = new LanguageServiceDefaults
 	optionsDefault,
 	modeConfigurationDefault
 );
-
-// export to the global based API
-(<any>languages).css = { cssDefaults, lessDefaults, scssDefaults };
-
-// --- Registration to monaco editor ---
+export const cssInJsDefaults: LanguageServiceDefaults = new LanguageServiceDefaultsImpl(
+	'cssInJs',
+	optionsDefault,
+	modeConfigurationDefault
+);
 
 function getMode(): Promise<typeof mode> {
 	return import('./cssMode');
 }
 
-languages.onLanguage('less', () => {
-	getMode().then((mode) => mode.setupMode(lessDefaults));
-});
+export const setupCssInJsLang = (
+	languages: ILanguagesInjection,
+	editor: IEditorInjection,
+	defaults: LanguageServiceDefaults = cssInJsDefaults
+) => {
+	const languageId = defaults.languageId;
 
-languages.onLanguage('scss', () => {
-	getMode().then((mode) => mode.setupMode(scssDefaults));
-});
+	languages.register({
+		id: languageId
+	});
 
-languages.onLanguage('css', () => {
-	getMode().then((mode) => mode.setupMode(cssDefaults));
-});
+	languages.setMonarchTokensProvider(languageId, cssInJsLang.language as any);
+	languages.setLanguageConfiguration(languageId, cssInJsLang.conf as any);
 
+	getMode().then((mode) => mode.setupMode(scssDefaults, editor, languages));
+};
+
+// languages.onLanguage('less', () => {
+// 	getMode().then((mode) => mode.setupMode(lessDefaults));
+// });
+
+// languages.onLanguage('scss', () => {
+// 	getMode().then((mode) => mode.setupMode(scssDefaults));
+// });
+
+// languages.onLanguage('css', () => {
+// 	getMode().then((mode) => mode.setupMode(cssDefaults));
+// });
 
 // CSS Data
 
@@ -312,7 +379,7 @@ export interface IValueData {
 	references?: IReference[];
 }
 export interface MarkupContent {
-    kind: MarkupKind;
-    value: string;
+	kind: MarkupKind;
+	value: string;
 }
 export declare type MarkupKind = 'plaintext' | 'markdown';

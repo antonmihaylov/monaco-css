@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { LanguageServiceDefaults } from './monaco.contribution';
-import type { CSSWorker } from './cssWorker';
+import { LanguageServiceDefaults, IEditorInjection } from './monaco.contribution';
+import type { CSSInJSWorker } from './cssWorker';
 import { editor, IDisposable, Uri } from './fillers/monaco-editor-core';
 
 const STOP_WHEN_IDLE_FOR = 2 * 60 * 1000; // 2min
@@ -15,10 +15,10 @@ export class WorkerManager {
 	private _lastUsedTime: number;
 	private _configChangeListener: IDisposable;
 
-	private _worker: editor.MonacoWebWorker<CSSWorker>;
-	private _client: Promise<CSSWorker>;
+	private _worker: editor.MonacoWebWorker<CSSInJSWorker>;
+	private _client: Promise<CSSInJSWorker>;
 
-	constructor(defaults: LanguageServiceDefaults) {
+	constructor(defaults: LanguageServiceDefaults, private editor: IEditorInjection) {
 		this._defaults = defaults;
 		this._worker = null;
 		this._idleCheckInterval = window.setInterval(() => this._checkIfIdle(), 30 * 1000);
@@ -50,11 +50,11 @@ export class WorkerManager {
 		}
 	}
 
-	private _getClient(): Promise<CSSWorker> {
+	private _getClient(): Promise<CSSInJSWorker> {
 		this._lastUsedTime = Date.now();
 
 		if (!this._client) {
-			this._worker = editor.createWebWorker<CSSWorker>({
+			this._worker = this.editor.createWebWorker<CSSInJSWorker>({
 				// module that exports the create() method and returns a `CSSWorker` instance
 				moduleId: 'vs/language/css/cssWorker',
 
@@ -67,14 +67,14 @@ export class WorkerManager {
 				}
 			});
 
-			this._client = <Promise<CSSWorker>>(<any>this._worker.getProxy());
+			this._client = <Promise<CSSInJSWorker>>(<any>this._worker.getProxy());
 		}
 
 		return this._client;
 	}
 
-	getLanguageServiceWorker(...resources: Uri[]): Promise<CSSWorker> {
-		let _client: CSSWorker;
+	getLanguageServiceWorker(...resources: Uri[]): Promise<CSSInJSWorker> {
+		let _client: CSSInJSWorker;
 		return this._getClient()
 			.then((client) => {
 				_client = client;

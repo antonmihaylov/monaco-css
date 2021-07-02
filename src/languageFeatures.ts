@@ -3,12 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { LanguageServiceDefaults } from './monaco.contribution';
-import type { CSSWorker } from './cssWorker';
+import {
+	IEditorInjection,
+	ILanguagesInjection,
+	LanguageServiceDefaults
+} from './monaco.contribution';
+import type { CSSInJSWorker } from './cssWorker';
 import * as cssService from 'vscode-css-languageservice';
 import {
 	languages,
-	editor,
 	IMarkdownString,
 	Uri,
 	Position,
@@ -16,13 +19,14 @@ import {
 	Range,
 	CancellationToken,
 	IDisposable,
-	MarkerSeverity
+	MarkerSeverity,
+	editor
 } from './fillers/monaco-editor-core';
 import { TextEdit } from 'vscode-css-languageservice';
 import { InsertReplaceEdit } from 'vscode-languageserver-types';
 
 export interface WorkerAccessor {
-	(first: Uri, ...more: Uri[]): Promise<CSSWorker>;
+	(first: Uri, ...more: Uri[]): Promise<CSSInJSWorker>;
 }
 
 // --- diagnostics --- ---
@@ -34,7 +38,8 @@ export class DiagnosticsAdapter {
 	constructor(
 		private _languageId: string,
 		private _worker: WorkerAccessor,
-		defaults: LanguageServiceDefaults
+		defaults: LanguageServiceDefaults,
+		private editorInjection: IEditorInjection
 	) {
 		const onModelAdd = (model: editor.IModel): void => {
 			let modeId = model.getModeId();
@@ -52,7 +57,7 @@ export class DiagnosticsAdapter {
 		};
 
 		const onModelRemoved = (model: editor.IModel): void => {
-			editor.setModelMarkers(model, this._languageId, []);
+			editorInjection.setModelMarkers(model, this._languageId, []);
 
 			let uriStr = model.uri.toString();
 			let listener = this._listener[uriStr];
@@ -62,17 +67,17 @@ export class DiagnosticsAdapter {
 			}
 		};
 
-		this._disposables.push(editor.onDidCreateModel(onModelAdd));
-		this._disposables.push(editor.onWillDisposeModel(onModelRemoved));
+		this._disposables.push(editorInjection.onDidCreateModel(onModelAdd));
+		this._disposables.push(editorInjection.onWillDisposeModel(onModelRemoved));
 		this._disposables.push(
-			editor.onDidChangeModelLanguage((event) => {
+			editorInjection.onDidChangeModelLanguage((event) => {
 				onModelRemoved(event.model);
 				onModelAdd(event.model);
 			})
 		);
 
 		defaults.onDidChange((_) => {
-			editor.getModels().forEach((model) => {
+			editorInjection.getModels().forEach((model) => {
 				if (model.getModeId() === this._languageId) {
 					onModelRemoved(model);
 					onModelAdd(model);
@@ -88,7 +93,7 @@ export class DiagnosticsAdapter {
 			}
 		});
 
-		editor.getModels().forEach(onModelAdd);
+		editorInjection.getModels().forEach(onModelAdd);
 	}
 
 	public dispose(): void {
@@ -102,10 +107,10 @@ export class DiagnosticsAdapter {
 				return worker.doValidation(resource.toString());
 			})
 			.then((diagnostics) => {
-				const markers = diagnostics.map((d) => toDiagnostics(resource, d));
-				let model = editor.getModel(resource);
+				const markers = diagnostics.map((d) => toDiagnostics(resource, d, this.editorInjection));
+				let model = this.editorInjection.getModel(resource);
 				if (model && model.getModeId() === languageId) {
-					editor.setModelMarkers(model, languageId, markers);
+					this.editorInjection.setModelMarkers(model, languageId, markers);
 				}
 			})
 			.then(undefined, (err) => {
@@ -113,27 +118,33 @@ export class DiagnosticsAdapter {
 			});
 	}
 }
-
-function toSeverity(lsSeverity: number): MarkerSeverity {
+function toSeverity(
+	lsSeverity: number,
+	severities: Record<keyof typeof MarkerSeverity, MarkerSeverity>
+): MarkerSeverity {
 	switch (lsSeverity) {
 		case cssService.DiagnosticSeverity.Error:
-			return MarkerSeverity.Error;
+			return severities.Error;
 		case cssService.DiagnosticSeverity.Warning:
-			return MarkerSeverity.Warning;
+			return severities.Warning;
 		case cssService.DiagnosticSeverity.Information:
-			return MarkerSeverity.Info;
+			return severities.Info;
 		case cssService.DiagnosticSeverity.Hint:
-			return MarkerSeverity.Hint;
+			return severities.Hint;
 		default:
-			return MarkerSeverity.Info;
+			return severities.Info;
 	}
 }
 
-function toDiagnostics(resource: Uri, diag: cssService.Diagnostic): editor.IMarkerData {
+function toDiagnostics(
+	resource: Uri,
+	diag: cssService.Diagnostic,
+	editor: IEditorInjection
+): editor.IMarkerData {
 	let code = typeof diag.code === 'number' ? String(diag.code) : <string>diag.code;
 
 	return {
-		severity: toSeverity(diag.severity),
+		severity: toSeverity(diag.severity || 0, editor.severities),
 		startLineNumber: diag.range.start.line + 1,
 		startColumn: diag.range.start.character + 1,
 		endLineNumber: diag.range.end.line + 1,
@@ -148,32 +159,33 @@ function toDiagnostics(resource: Uri, diag: cssService.Diagnostic): editor.IMark
 
 function fromPosition(position: Position): cssService.Position {
 	if (!position) {
-		return void 0;
+		return void 0 as any;
 	}
-	return { character: position.column - 1, line: position.lineNumber - 1 };
+	return { character: position.column - 1, line: position.lineNumber };
 }
 
 function fromRange(range: IRange): cssService.Range {
 	if (!range) {
-		return void 0;
+		return void 0 as any;
 	}
 	return {
 		start: {
-			line: range.startLineNumber - 1,
+			line: range.startLineNumber,
 			character: range.startColumn - 1
 		},
-		end: { line: range.endLineNumber - 1, character: range.endColumn - 1 }
+		end: { line: range.endLineNumber, character: range.endColumn - 1 }
 	};
 }
 
-function toRange(range: cssService.Range): Range {
+function toRange(range: cssService.Range, ieditor: IEditorInjection): Range {
 	if (!range) {
-		return void 0;
+		return void 0 as any;
 	}
-	return new Range(
-		range.start.line + 1,
+
+	return new ieditor.Range(
+		range.start.line,
 		range.start.character + 1,
-		range.end.line + 1,
+		range.end.line,
 		range.end.character + 1
 	);
 }
@@ -185,9 +197,10 @@ function isInsertReplaceEdit(edit: TextEdit | InsertReplaceEdit): edit is Insert
 	);
 }
 
-function toCompletionItemKind(kind: number): languages.CompletionItemKind {
-	let mItemKind = languages.CompletionItemKind;
-
+function toCompletionItemKind(
+	kind: number,
+	mItemKind: Record<keyof typeof languages.CompletionItemKind, languages.CompletionItemKind>
+): languages.CompletionItemKind {
 	switch (kind) {
 		case cssService.CompletionItemKind.Text:
 			return mItemKind.Text;
@@ -229,18 +242,21 @@ function toCompletionItemKind(kind: number): languages.CompletionItemKind {
 	return mItemKind.Property;
 }
 
-function toTextEdit(textEdit: cssService.TextEdit): editor.ISingleEditOperation {
+function toTextEdit(
+	textEdit: cssService.TextEdit,
+	ieditor: IEditorInjection
+): editor.ISingleEditOperation {
 	if (!textEdit) {
-		return void 0;
+		return void 0 as any;
 	}
 	return {
-		range: toRange(textEdit.range),
+		range: toRange(textEdit.range, ieditor),
 		text: textEdit.newText
 	};
 }
 
 export class CompletionAdapter implements languages.CompletionItemProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
 
 	public get triggerCharacters(): string[] {
 		return [' ', ':'];
@@ -263,7 +279,7 @@ export class CompletionAdapter implements languages.CompletionItemProvider {
 					return;
 				}
 				const wordInfo = model.getWordUntilPosition(position);
-				const wordRange = new Range(
+				const wordRange = new this.editorInjection.Range(
 					position.lineNumber,
 					wordInfo.startColumn,
 					position.lineNumber,
@@ -279,24 +295,26 @@ export class CompletionAdapter implements languages.CompletionItemProvider {
 						documentation: entry.documentation,
 						detail: entry.detail,
 						range: wordRange,
-						kind: toCompletionItemKind(entry.kind)
+						kind: toCompletionItemKind(entry.kind, this.editorInjection.itemKinds)
 					};
 					if (entry.textEdit) {
 						if (isInsertReplaceEdit(entry.textEdit)) {
 							item.range = {
-								insert: toRange(entry.textEdit.insert),
-								replace: toRange(entry.textEdit.replace)
+								insert: toRange(entry.textEdit.insert, this.editorInjection),
+								replace: toRange(entry.textEdit.replace, this.editorInjection)
 							};
 						} else {
-							item.range = toRange(entry.textEdit.range);
+							item.range = toRange(entry.textEdit.range, this.editorInjection);
 						}
 						item.insertText = entry.textEdit.newText;
 					}
 					if (entry.additionalTextEdits) {
-						item.additionalTextEdits = entry.additionalTextEdits.map(toTextEdit);
+						item.additionalTextEdits = entry.additionalTextEdits.map((v) =>
+							toTextEdit(v, this.editorInjection)
+						);
 					}
 					if (entry.insertTextFormat === cssService.InsertTextFormat.Snippet) {
-						item.insertTextRules = languages.CompletionItemInsertTextRule.InsertAsSnippet;
+						item.insertTextRules = this.editorInjection.CompletionItemInsertTextRule.InsertAsSnippet;
 					}
 					return item;
 				});
@@ -352,7 +370,7 @@ function toMarkedStringArray(
 // --- hover ------
 
 export class HoverAdapter implements languages.HoverProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
 
 	provideHover(
 		model: editor.IReadOnlyModel,
@@ -370,7 +388,7 @@ export class HoverAdapter implements languages.HoverProvider {
 					return;
 				}
 				return <languages.Hover>{
-					range: toRange(info.range),
+					range: toRange(info.range, this.editorInjection),
 					contents: toMarkedStringArray(info.contents)
 				};
 			});
@@ -379,7 +397,10 @@ export class HoverAdapter implements languages.HoverProvider {
 
 // --- document highlights ------
 
-function toDocumentHighlightKind(kind: number): languages.DocumentHighlightKind {
+function toDocumentHighlightKind(
+	kind: number,
+	languages: ILanguagesInjection
+): languages.DocumentHighlightKind {
 	switch (kind) {
 		case cssService.DocumentHighlightKind.Read:
 			return languages.DocumentHighlightKind.Read;
@@ -392,7 +413,11 @@ function toDocumentHighlightKind(kind: number): languages.DocumentHighlightKind 
 }
 
 export class DocumentHighlightAdapter implements languages.DocumentHighlightProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(
+		private _worker: WorkerAccessor,
+		private editorInjection: IEditorInjection,
+		private languages: ILanguagesInjection
+	) {}
 
 	public provideDocumentHighlights(
 		model: editor.IReadOnlyModel,
@@ -411,8 +436,8 @@ export class DocumentHighlightAdapter implements languages.DocumentHighlightProv
 				}
 				return entries.map((entry) => {
 					return <languages.DocumentHighlight>{
-						range: toRange(entry.range),
-						kind: toDocumentHighlightKind(entry.kind)
+						range: toRange(entry.range, this.editorInjection),
+						kind: toDocumentHighlightKind(entry.kind, this.languages)
 					};
 				});
 			});
@@ -421,15 +446,15 @@ export class DocumentHighlightAdapter implements languages.DocumentHighlightProv
 
 // --- definition ------
 
-function toLocation(location: cssService.Location): languages.Location {
+function toLocation(location: cssService.Location, editor: IEditorInjection): languages.Location {
 	return {
-		uri: Uri.parse(location.uri),
-		range: toRange(location.range)
+		uri: editor.Uri.parse(location.uri),
+		range: toRange(location.range, editor)
 	};
 }
 
 export class DefinitionAdapter {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
 
 	public provideDefinition(
 		model: editor.IReadOnlyModel,
@@ -446,7 +471,7 @@ export class DefinitionAdapter {
 				if (!definition) {
 					return;
 				}
-				return [toLocation(definition)];
+				return [toLocation(definition, this.editorInjection)];
 			});
 	}
 }
@@ -454,7 +479,7 @@ export class DefinitionAdapter {
 // --- references ------
 
 export class ReferenceAdapter implements languages.ReferenceProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
 
 	provideReferences(
 		model: editor.IReadOnlyModel,
@@ -472,26 +497,29 @@ export class ReferenceAdapter implements languages.ReferenceProvider {
 				if (!entries) {
 					return;
 				}
-				return entries.map(toLocation);
+				return entries.map((v) => toLocation(v, this.editorInjection));
 			});
 	}
 }
 
 // --- rename ------
 
-function toWorkspaceEdit(edit: cssService.WorkspaceEdit): languages.WorkspaceEdit {
+function toWorkspaceEdit(
+	edit: cssService.WorkspaceEdit,
+	editorInjection: IEditorInjection
+): languages.WorkspaceEdit {
 	if (!edit || !edit.changes) {
 		return void 0;
 	}
 	let resourceEdits: languages.WorkspaceTextEdit[] = [];
 	for (let uri in edit.changes) {
-		const _uri = Uri.parse(uri);
+		const _uri = editorInjection.Uri.parse(uri);
 		// let edits: languages.TextEdit[] = [];
 		for (let e of edit.changes[uri]) {
 			resourceEdits.push({
 				resource: _uri,
 				edit: {
-					range: toRange(e.range),
+					range: toRange(e.range, editorInjection),
 					text: e.newText
 				}
 			});
@@ -503,7 +531,7 @@ function toWorkspaceEdit(edit: cssService.WorkspaceEdit): languages.WorkspaceEdi
 }
 
 export class RenameAdapter implements languages.RenameProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
 
 	provideRenameEdits(
 		model: editor.IReadOnlyModel,
@@ -518,14 +546,17 @@ export class RenameAdapter implements languages.RenameProvider {
 				return worker.doRename(resource.toString(), fromPosition(position), newName);
 			})
 			.then((edit) => {
-				return toWorkspaceEdit(edit);
+				return toWorkspaceEdit(edit, this.editorInjection);
 			});
 	}
 }
 
 // --- document symbols ------
 
-function toSymbolKind(kind: cssService.SymbolKind): languages.SymbolKind {
+function toSymbolKind(
+	kind: cssService.SymbolKind,
+	languages: ILanguagesInjection
+): languages.SymbolKind {
 	let mKind = languages.SymbolKind;
 
 	switch (kind) {
@@ -570,7 +601,11 @@ function toSymbolKind(kind: cssService.SymbolKind): languages.SymbolKind {
 }
 
 export class DocumentSymbolAdapter implements languages.DocumentSymbolProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(
+		private _worker: WorkerAccessor,
+		private languages: ILanguagesInjection,
+		private editor: IEditorInjection
+	) {}
 
 	public provideDocumentSymbols(
 		model: editor.IReadOnlyModel,
@@ -588,17 +623,17 @@ export class DocumentSymbolAdapter implements languages.DocumentSymbolProvider {
 					name: item.name,
 					detail: '',
 					containerName: item.containerName,
-					kind: toSymbolKind(item.kind),
+					kind: toSymbolKind(item.kind, this.languages),
 					tags: [],
-					range: toRange(item.location.range),
-					selectionRange: toRange(item.location.range)
+					range: toRange(item.location.range, this.editor),
+					selectionRange: toRange(item.location.range, this.editor)
 				}));
 			});
 	}
 }
 
 export class DocumentColorAdapter implements languages.DocumentColorProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editor: IEditorInjection) {}
 
 	public provideDocumentColors(
 		model: editor.IReadOnlyModel,
@@ -614,7 +649,7 @@ export class DocumentColorAdapter implements languages.DocumentColorProvider {
 				}
 				return infos.map((item) => ({
 					color: item.color,
-					range: toRange(item.range)
+					range: toRange(item.range, this.editor)
 				}));
 			});
 	}
@@ -639,10 +674,12 @@ export class DocumentColorAdapter implements languages.DocumentColorProvider {
 						label: presentation.label
 					};
 					if (presentation.textEdit) {
-						item.textEdit = toTextEdit(presentation.textEdit);
+						item.textEdit = toTextEdit(presentation.textEdit, this.editor);
 					}
 					if (presentation.additionalTextEdits) {
-						item.additionalTextEdits = presentation.additionalTextEdits.map(toTextEdit);
+						item.additionalTextEdits = presentation.additionalTextEdits.map((v) =>
+							toTextEdit(v, this.editor)
+						);
 					}
 					return item;
 				});
@@ -651,7 +688,7 @@ export class DocumentColorAdapter implements languages.DocumentColorProvider {
 }
 
 export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private languages: ILanguagesInjection) {}
 
 	public provideFoldingRanges(
 		model: editor.IReadOnlyModel,
@@ -672,7 +709,10 @@ export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
 						end: range.endLine + 1
 					};
 					if (typeof range.kind !== 'undefined') {
-						result.kind = toFoldingRangeKind(<cssService.FoldingRangeKind>range.kind);
+						result.kind = toFoldingRangeKind(
+							<cssService.FoldingRangeKind>range.kind,
+							this.languages
+						);
 					}
 					return result;
 				});
@@ -680,7 +720,10 @@ export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
 	}
 }
 
-function toFoldingRangeKind(kind: cssService.FoldingRangeKind): languages.FoldingRangeKind {
+function toFoldingRangeKind(
+	kind: cssService.FoldingRangeKind,
+	languages: ILanguagesInjection
+): languages.FoldingRangeKind {
 	switch (kind) {
 		case cssService.FoldingRangeKind.Comment:
 			return languages.FoldingRangeKind.Comment;
@@ -692,7 +735,7 @@ function toFoldingRangeKind(kind: cssService.FoldingRangeKind): languages.Foldin
 }
 
 export class SelectionRangeAdapter implements languages.SelectionRangeProvider {
-	constructor(private _worker: WorkerAccessor) {}
+	constructor(private _worker: WorkerAccessor, private editor: IEditorInjection) {}
 
 	public provideSelectionRanges(
 		model: editor.IReadOnlyModel,
@@ -710,7 +753,7 @@ export class SelectionRangeAdapter implements languages.SelectionRangeProvider {
 				return selectionRanges.map((selectionRange) => {
 					const result: languages.SelectionRange[] = [];
 					while (selectionRange) {
-						result.push({ range: toRange(selectionRange.range) });
+						result.push({ range: toRange(selectionRange.range, this.editor) });
 						selectionRange = selectionRange.parent;
 					}
 					return result;

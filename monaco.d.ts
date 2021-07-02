@@ -6,6 +6,48 @@
 /// <reference path="node_modules/monaco-editor-core/monaco.d.ts" />
 
 declare namespace monaco.languages.css {
+	export interface IEditorInjection {
+		createWebWorker: typeof editor.createWebWorker;
+		setModelMarkers: typeof editor.setModelMarkers;
+		onDidCreateModel: typeof editor.onDidCreateModel;
+		onWillDisposeModel: typeof editor.onWillDisposeModel;
+		onDidChangeModelLanguage: typeof editor.onDidChangeModelLanguage;
+		getModels: typeof editor.getModels;
+		getModel: typeof editor.getModel;
+		severities: Record<keyof typeof MarkerSeverity, MarkerSeverity>;
+		itemKinds: Record<keyof typeof languages.CompletionItemKind, languages.CompletionItemKind>;
+		CompletionItemInsertTextRule: Record<
+			keyof typeof languages.CompletionItemInsertTextRule,
+			languages.CompletionItemInsertTextRule
+		>;
+		Uri: typeof Uri;
+		Range: {
+			new (
+				startLineNumber: number,
+				startColumn: number,
+				endLineNumber: number,
+				endColumn: number
+			): Range;
+		};
+	}
+	export interface ILanguagesInjection {
+		setLanguageConfiguration: typeof languages.setLanguageConfiguration;
+		setMonarchTokensProvider: typeof languages.setMonarchTokensProvider;
+		registerCompletionItemProvider: typeof languages.registerCompletionItemProvider;
+		register: typeof languages.register;
+		registerHoverProvider: typeof languages.registerHoverProvider;
+		registerDocumentHighlightProvider: typeof languages.registerDocumentHighlightProvider;
+		registerDefinitionProvider: typeof languages.registerDefinitionProvider;
+		registerReferenceProvider: typeof languages.registerReferenceProvider;
+		registerDocumentSymbolProvider: typeof languages.registerDocumentSymbolProvider;
+		registerRenameProvider: typeof languages.registerRenameProvider;
+		registerColorProvider: typeof languages.registerColorProvider;
+		registerFoldingRangeProvider: typeof languages.registerFoldingRangeProvider;
+		registerSelectionRangeProvider: typeof languages.registerSelectionRangeProvider;
+		DocumentHighlightKind: typeof languages.DocumentHighlightKind;
+		SymbolKind: typeof languages.SymbolKind;
+		FoldingRangeKind: typeof languages.FoldingRangeKind;
+	}
 	export interface Options {
 		readonly validate?: boolean;
 		readonly lint?: {
@@ -96,6 +138,12 @@ declare namespace monaco.languages.css {
 	export const cssDefaults: LanguageServiceDefaults;
 	export const scssDefaults: LanguageServiceDefaults;
 	export const lessDefaults: LanguageServiceDefaults;
+	export const cssInJsDefaults: LanguageServiceDefaults;
+	export const setupCssInJsLang: (
+		languages: ILanguagesInjection,
+		editor: IEditorInjection,
+		defaults?: LanguageServiceDefaults
+	) => void;
 	export interface CSSDataConfiguration {
 		/**
 		 * Defines whether the standard CSS properties, at-directives, pseudoClasses and pseudoElements are shown.

@@ -4,19 +4,27 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { WorkerManager } from './workerManager';
-import type { CSSWorker } from './cssWorker';
-import { LanguageServiceDefaults } from './monaco.contribution';
+import type { CSSInJSWorker } from './cssWorker';
+import {
+	IEditorInjection,
+	ILanguagesInjection,
+	LanguageServiceDefaults
+} from './monaco.contribution';
 import * as languageFeatures from './languageFeatures';
 import { Uri, IDisposable, languages } from './fillers/monaco-editor-core';
 
-export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
+export function setupMode(
+	defaults: LanguageServiceDefaults,
+	editor: IEditorInjection,
+	languages: ILanguagesInjection
+): IDisposable {
 	const disposables: IDisposable[] = [];
 	const providers: IDisposable[] = [];
 
-	const client = new WorkerManager(defaults);
+	const client = new WorkerManager(defaults, editor);
 	disposables.push(client);
 
-	const worker: languageFeatures.WorkerAccessor = (...uris: Uri[]): Promise<CSSWorker> => {
+	const worker: languageFeatures.WorkerAccessor = (...uris: Uri[]): Promise<CSSInJSWorker> => {
 		return client.getLanguageServiceWorker(...uris);
 	};
 
@@ -29,20 +37,23 @@ export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
 			providers.push(
 				languages.registerCompletionItemProvider(
 					languageId,
-					new languageFeatures.CompletionAdapter(worker)
+					new languageFeatures.CompletionAdapter(worker, editor)
 				)
 			);
 		}
 		if (modeConfiguration.hovers) {
 			providers.push(
-				languages.registerHoverProvider(languageId, new languageFeatures.HoverAdapter(worker))
+				languages.registerHoverProvider(
+					languageId,
+					new languageFeatures.HoverAdapter(worker, editor)
+				)
 			);
 		}
 		if (modeConfiguration.documentHighlights) {
 			providers.push(
 				languages.registerDocumentHighlightProvider(
 					languageId,
-					new languageFeatures.DocumentHighlightAdapter(worker)
+					new languageFeatures.DocumentHighlightAdapter(worker, editor, languages)
 				)
 			);
 		}
@@ -50,7 +61,7 @@ export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
 			providers.push(
 				languages.registerDefinitionProvider(
 					languageId,
-					new languageFeatures.DefinitionAdapter(worker)
+					new languageFeatures.DefinitionAdapter(worker, editor)
 				)
 			);
 		}
@@ -58,7 +69,7 @@ export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
 			providers.push(
 				languages.registerReferenceProvider(
 					languageId,
-					new languageFeatures.ReferenceAdapter(worker)
+					new languageFeatures.ReferenceAdapter(worker, editor)
 				)
 			);
 		}
@@ -66,20 +77,23 @@ export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
 			providers.push(
 				languages.registerDocumentSymbolProvider(
 					languageId,
-					new languageFeatures.DocumentSymbolAdapter(worker)
+					new languageFeatures.DocumentSymbolAdapter(worker, languages, editor)
 				)
 			);
 		}
 		if (modeConfiguration.rename) {
 			providers.push(
-				languages.registerRenameProvider(languageId, new languageFeatures.RenameAdapter(worker))
+				languages.registerRenameProvider(
+					languageId,
+					new languageFeatures.RenameAdapter(worker, editor)
+				)
 			);
 		}
 		if (modeConfiguration.colors) {
 			providers.push(
 				languages.registerColorProvider(
 					languageId,
-					new languageFeatures.DocumentColorAdapter(worker)
+					new languageFeatures.DocumentColorAdapter(worker, editor)
 				)
 			);
 		}
@@ -87,18 +101,18 @@ export function setupMode(defaults: LanguageServiceDefaults): IDisposable {
 			providers.push(
 				languages.registerFoldingRangeProvider(
 					languageId,
-					new languageFeatures.FoldingRangeAdapter(worker)
+					new languageFeatures.FoldingRangeAdapter(worker, languages)
 				)
 			);
 		}
 		if (modeConfiguration.diagnostics) {
-			providers.push(new languageFeatures.DiagnosticsAdapter(languageId, worker, defaults));
+			providers.push(new languageFeatures.DiagnosticsAdapter(languageId, worker, defaults, editor));
 		}
 		if (modeConfiguration.selectionRanges) {
 			providers.push(
 				languages.registerSelectionRangeProvider(
 					languageId,
-					new languageFeatures.SelectionRangeAdapter(worker)
+					new languageFeatures.SelectionRangeAdapter(worker, editor)
 				)
 			);
 		}

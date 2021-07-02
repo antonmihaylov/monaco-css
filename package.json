@@ -1,7 +1,7 @@
 {
-	"name": "monaco-css",
+	"name": "monaco-css-in-js",
 	"version": "3.5.0",
-	"description": "CSS, LESS and SCSS plugin for the Monaco Editor",
+	"description": "Fork of the CSS, LESS and SCSS plugin for the Monaco Editor, providing support for CSS-in-JS (styled components, emotion)",
 	"scripts": {
 		"compile": "mrmdir ./out && tsc -p ./src/tsconfig.json && tsc -p ./src/tsconfig.esm.json && node ./scripts/dts && prettier --write ./monaco.d.ts",
 		"watch": "tsc -p ./src --watch",
