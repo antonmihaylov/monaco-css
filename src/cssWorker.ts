@@ -44,7 +44,7 @@ export class CSSInJSWorker {
 			case 'scss':
 				this._languageService = cssService.getSCSSLanguageService(lsOptions);
 				break;
-			case 'scss':
+			case 'cssInJs':
 				this._languageService = cssService.getSCSSLanguageService(lsOptions);
 				break;
 			default:
