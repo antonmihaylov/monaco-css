@@ -44,6 +44,9 @@ export class CSSInJSWorker {
 			case 'scss':
 				this._languageService = cssService.getSCSSLanguageService(lsOptions);
 				break;
+			case 'scss':
+				this._languageService = cssService.getSCSSLanguageService(lsOptions);
+				break;
 			default:
 				throw new Error('Invalid language id: ' + this._languageId);
 		}
