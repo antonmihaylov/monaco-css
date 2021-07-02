@@ -179,9 +179,9 @@ class LanguageServiceDefaultsImpl implements LanguageServiceDefaults {
 		editor: IEditorInjection
 	) {
 		this._languageId = languageId;
+		this._onDidChange = new editor.Emitter<LanguageServiceDefaults>();
 		this.setOptions(options);
 		this.setModeConfiguration(modeConfiguration);
-		this._onDidChange = new editor.Emitter<LanguageServiceDefaults>();
 	}
 
 	get onDidChange(): IEvent<LanguageServiceDefaults> {
