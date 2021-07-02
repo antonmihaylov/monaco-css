@@ -14,10 +14,10 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Microsoft/monaco-css"
+		"url": "https://github.com/antonmihaylov/monaco-css"
 	},
 	"bugs": {
-		"url": "https://github.com/Microsoft/monaco-css/issues"
+		"url": "https://github.com/antonmihaylov/monaco-css/issues"
 	},
 	"module": "./release/esm/monaco.contribution.js",
 	"typings": "./release/esm/monaco.contribution.d.ts",
