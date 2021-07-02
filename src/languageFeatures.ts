@@ -312,8 +312,6 @@ export class CompletionAdapter implements languages.CompletionItemProvider {
 				item.insertTextRules = this.editor.CompletionItemInsertTextRule.InsertAsSnippet;
 			}
 
-			console.log(item.range);
-
 			return item;
 		});
 

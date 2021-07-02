@@ -23,7 +23,6 @@ export function setupMode(
 
 	function registerProviders(): void {
 		const { languageId, modeConfiguration } = defaults;
-		console.log(modeConfiguration);
 
 		disposeAll(providers);
 
