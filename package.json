@@ -22,7 +22,7 @@
 	"module": "./release/esm/monaco.contribution.js",
 	"typings": "./release/esm/monaco.contribution.d.ts",
 	"devDependencies": {
-		"husky": "^5.1.3",
+		"husky": "^5.1.4",
 		"monaco-editor-core": "0.25.0",
 		"monaco-languages": "2.4.0",
 		"monaco-plugin-helpers": "^1.0.3",
