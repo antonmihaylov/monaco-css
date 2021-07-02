@@ -40,6 +40,7 @@ export interface IEditorInjection {
 			endColumn: number
 		): Range;
 	};
+	Emitter: { new <T>(): Emitter<T> };
 }
 
 export interface ILanguagesInjection {
@@ -171,11 +172,16 @@ class LanguageServiceDefaultsImpl implements LanguageServiceDefaults {
 	private _modeConfiguration: ModeConfiguration;
 	private _languageId: string;
 
-	constructor(languageId: string, options: Options, modeConfiguration: ModeConfiguration) {
+	constructor(
+		languageId: string,
+		options: Options,
+		modeConfiguration: ModeConfiguration,
+		editor: IEditorInjection
+	) {
 		this._languageId = languageId;
 		this.setOptions(options);
 		this.setModeConfiguration(modeConfiguration);
-		this._onDidChange = new Emitter();
+		this._onDidChange = new editor.Emitter<LanguageServiceDefaults>();
 	}
 
 	get onDidChange(): IEvent<LanguageServiceDefaults> {
@@ -252,26 +258,9 @@ const modeConfigurationDefault: Required<ModeConfiguration> = {
 	selectionRanges: true
 };
 
-export const cssDefaults: LanguageServiceDefaults = new LanguageServiceDefaultsImpl(
-	'css',
-	optionsDefault,
-	modeConfigurationDefault
-);
-export const scssDefaults: LanguageServiceDefaults = new LanguageServiceDefaultsImpl(
-	'scss',
-	optionsDefault,
-	modeConfigurationDefault
-);
-export const lessDefaults: LanguageServiceDefaults = new LanguageServiceDefaultsImpl(
-	'less',
-	optionsDefault,
-	modeConfigurationDefault
-);
-export const cssInJsDefaults: LanguageServiceDefaults = new LanguageServiceDefaultsImpl(
-	'cssInJs',
-	optionsDefault,
-	modeConfigurationDefault
-);
+export const cssInJsDefaults: (editor: IEditorInjection) => LanguageServiceDefaults = (
+	editor: IEditorInjection
+) => new LanguageServiceDefaultsImpl('cssInJs', optionsDefault, modeConfigurationDefault, editor);
 
 function getMode(): Promise<typeof mode> {
 	return import('./cssMode');
@@ -280,8 +269,12 @@ function getMode(): Promise<typeof mode> {
 export const setupCssInJsLang = (
 	languages: ILanguagesInjection,
 	editor: IEditorInjection,
-	defaults: LanguageServiceDefaults = cssInJsDefaults
+	defaults: LanguageServiceDefaults = null
 ) => {
+	if (!defaults) {
+		defaults = cssInJsDefaults(editor);
+	}
+
 	const languageId = defaults.languageId;
 
 	languages.register({
@@ -291,7 +284,7 @@ export const setupCssInJsLang = (
 	languages.setMonarchTokensProvider(languageId, cssInJsLang.language as any);
 	languages.setLanguageConfiguration(languageId, cssInJsLang.conf as any);
 
-	getMode().then((mode) => mode.setupMode(scssDefaults, editor, languages));
+	getMode().then((mode) => mode.setupMode(defaults, editor, languages));
 };
 
 // languages.onLanguage('less', () => {

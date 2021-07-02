@@ -1,6 +1,6 @@
 # Monaco CSS
 
-CSS language plugin for the Monaco Editor. It provides the following features when editing CSS, LESS and SCSS files:
+Fork of the CSS, LESS and SCSS plugin for the Monaco Editor, providing support for CSS-in-JS (styled components, emotion)
 
 - Code completion
 - Hovers

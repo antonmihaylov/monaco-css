@@ -16,10 +16,9 @@ import type {
 	IMarkdownString,
 	Range,
 	worker,
-	IEvent
+	IEvent,
+	Emitter
 } from 'monaco-editor-core';
-
-import { Emitter } from 'monaco-editor-core/esm/vs/base/common/event';
 
 export type {
 	languages,
@@ -33,7 +32,6 @@ export type {
 	IMarkdownString,
 	Range,
 	worker,
-	IEvent
+	IEvent,
+	Emitter
 };
-
-export { Emitter };

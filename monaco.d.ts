@@ -29,6 +29,9 @@ declare namespace monaco.languages.css {
 				endColumn: number
 			): Range;
 		};
+		Emitter: {
+			new <T>(): Emitter<T>;
+		};
 	}
 	export interface ILanguagesInjection {
 		setLanguageConfiguration: typeof languages.setLanguageConfiguration;
@@ -135,10 +138,7 @@ declare namespace monaco.languages.css {
 	}
 	/** @deprecated Use Options instead */
 	export type DiagnosticsOptions = Options;
-	export const cssDefaults: LanguageServiceDefaults;
-	export const scssDefaults: LanguageServiceDefaults;
-	export const lessDefaults: LanguageServiceDefaults;
-	export const cssInJsDefaults: LanguageServiceDefaults;
+	export const cssInJsDefaults: (editor: IEditorInjection) => LanguageServiceDefaults;
 	export const setupCssInJsLang: (
 		languages: ILanguagesInjection,
 		editor: IEditorInjection,
