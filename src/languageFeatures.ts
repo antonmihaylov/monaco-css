@@ -3,12 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import {
-	IEditorInjection,
-	ILanguagesInjection,
-	LanguageServiceDefaults
-} from './monaco.contribution';
-import type { CSSInJSWorker } from './cssWorker';
+import { IEditorInjection, ILanguagesInjection } from './monaco.contribution';
 import * as cssService from 'vscode-css-languageservice';
 import {
 	languages,
@@ -22,24 +17,26 @@ import {
 	MarkerSeverity,
 	editor
 } from './fillers/monaco-editor-core';
+import { CSSInJSWorker } from './cssWorker';
 import { TextEdit } from 'vscode-css-languageservice';
 import { InsertReplaceEdit } from 'vscode-languageserver-types';
+type IEditor = editor.IEditor;
+type ITextModel = editor.ITextModel;
 
 export interface WorkerAccessor {
 	(first: Uri, ...more: Uri[]): Promise<CSSInJSWorker>;
 }
 
 // --- diagnostics --- ---
-
 export class DiagnosticsAdapter {
 	private _disposables: IDisposable[] = [];
 	private _listener: { [uri: string]: IDisposable } = Object.create(null);
 
 	constructor(
 		private _languageId: string,
-		private _worker: WorkerAccessor,
-		defaults: LanguageServiceDefaults,
-		private editorInjection: IEditorInjection
+		private editor: IEditor,
+		private _worker: CSSInJSWorker,
+		private editorInj: IEditorInjection
 	) {
 		const onModelAdd = (model: editor.IModel): void => {
 			let modeId = model.getModeId();
@@ -50,14 +47,17 @@ export class DiagnosticsAdapter {
 			let handle: number;
 			this._listener[model.uri.toString()] = model.onDidChangeContent(() => {
 				window.clearTimeout(handle);
-				handle = window.setTimeout(() => this._doValidate(model.uri, modeId), 500);
+				handle = window.setTimeout(
+					() => this._doValidate(model.uri, modeId, editor, editorInj),
+					500
+				);
 			});
 
-			this._doValidate(model.uri, modeId);
+			this._doValidate(model.uri, modeId, editor, editorInj);
 		};
 
 		const onModelRemoved = (model: editor.IModel): void => {
-			editorInjection.setModelMarkers(model, this._languageId, []);
+			editorInj.setModelMarkers(model, this._languageId, []);
 
 			let uriStr = model.uri.toString();
 			let listener = this._listener[uriStr];
@@ -67,23 +67,14 @@ export class DiagnosticsAdapter {
 			}
 		};
 
-		this._disposables.push(editorInjection.onDidCreateModel(onModelAdd));
-		this._disposables.push(editorInjection.onWillDisposeModel(onModelRemoved));
+		this._disposables.push(editorInj.onDidCreateModel(onModelAdd));
+		this._disposables.push(editorInj.onWillDisposeModel(onModelRemoved));
 		this._disposables.push(
-			editorInjection.onDidChangeModelLanguage((event) => {
+			editorInj.onDidChangeModelLanguage((event) => {
 				onModelRemoved(event.model);
 				onModelAdd(event.model);
 			})
 		);
-
-		defaults.onDidChange((_) => {
-			editorInjection.getModels().forEach((model) => {
-				if (model.getModeId() === this._languageId) {
-					onModelRemoved(model);
-					onModelAdd(model);
-				}
-			});
-		});
 
 		this._disposables.push({
 			dispose: () => {
@@ -93,7 +84,7 @@ export class DiagnosticsAdapter {
 			}
 		});
 
-		editorInjection.getModels().forEach(onModelAdd);
+		editorInj.getModels().forEach(onModelAdd);
 	}
 
 	public dispose(): void {
@@ -101,16 +92,19 @@ export class DiagnosticsAdapter {
 		this._disposables = [];
 	}
 
-	private _doValidate(resource: Uri, languageId: string): void {
-		this._worker(resource)
-			.then((worker) => {
-				return worker.doValidation(resource.toString());
-			})
+	private _doValidate(
+		resource: Uri,
+		languageId: string,
+		editor: IEditor,
+		editorInj: IEditorInjection
+	): void {
+		this._worker
+			.doValidation(resource.toString(), editor.getModel() as ITextModel)
 			.then((diagnostics) => {
-				const markers = diagnostics.map((d) => toDiagnostics(resource, d, this.editorInjection));
-				let model = this.editorInjection.getModel(resource);
-				if (model && model.getModeId() === languageId) {
-					this.editorInjection.setModelMarkers(model, languageId, markers);
+				const markers = diagnostics.map((d) => toDiagnostics(resource, d, editorInj));
+				let model = editor.getModel();
+				if (model) {
+					editorInj.setModelMarkers(model as ITextModel, languageId, markers);
 				}
 			})
 			.then(undefined, (err) => {
@@ -118,6 +112,7 @@ export class DiagnosticsAdapter {
 			});
 	}
 }
+
 function toSeverity(
 	lsSeverity: number,
 	severities: Record<keyof typeof MarkerSeverity, MarkerSeverity>
@@ -256,13 +251,13 @@ function toTextEdit(
 }
 
 export class CompletionAdapter implements languages.CompletionItemProvider {
-	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
 	public get triggerCharacters(): string[] {
 		return [' ', ':'];
 	}
 
-	provideCompletionItems(
+	async provideCompletionItems(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		context: languages.CompletionContext,
@@ -270,60 +265,62 @@ export class CompletionAdapter implements languages.CompletionItemProvider {
 	): Promise<languages.CompletionList> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.doComplete(resource.toString(), fromPosition(position));
-			})
-			.then((info) => {
-				if (!info) {
-					return;
-				}
-				const wordInfo = model.getWordUntilPosition(position);
-				const wordRange = new this.editorInjection.Range(
-					position.lineNumber,
-					wordInfo.startColumn,
-					position.lineNumber,
-					wordInfo.endColumn
-				);
+		const info = await this._worker.doComplete(resource.toString(), fromPosition(position), model);
 
-				let items: languages.CompletionItem[] = info.items.map((entry) => {
-					let item: languages.CompletionItem = {
-						label: entry.label,
-						insertText: entry.insertText || entry.label,
-						sortText: entry.sortText,
-						filterText: entry.filterText,
-						documentation: entry.documentation,
-						detail: entry.detail,
-						range: wordRange,
-						kind: toCompletionItemKind(entry.kind, this.editorInjection.itemKinds)
+		if (!info) {
+			return void 0 as any;
+		}
+		const wordInfo = model.getWordUntilPosition({
+			column: position.column,
+			lineNumber: position.lineNumber
+		});
+
+		const wordRange = new this.editor.Range(
+			position.lineNumber,
+			wordInfo.startColumn,
+			position.lineNumber,
+			wordInfo.endColumn
+		);
+
+		let items: languages.CompletionItem[] = info.items.map((entry) => {
+			let item: languages.CompletionItem = {
+				label: entry.label,
+				insertText: entry.insertText || entry.label,
+				sortText: entry.sortText,
+				filterText: entry.filterText,
+				documentation: entry.documentation,
+				detail: entry.detail,
+				range: wordRange,
+				kind: toCompletionItemKind(entry.kind || 0, this.editor.itemKinds)
+			};
+
+			if (entry.textEdit) {
+				if (isInsertReplaceEdit(entry.textEdit)) {
+					item.range = {
+						insert: toRange(entry.textEdit.insert, this.editor),
+						replace: toRange(entry.textEdit.replace, this.editor)
 					};
-					if (entry.textEdit) {
-						if (isInsertReplaceEdit(entry.textEdit)) {
-							item.range = {
-								insert: toRange(entry.textEdit.insert, this.editorInjection),
-								replace: toRange(entry.textEdit.replace, this.editorInjection)
-							};
-						} else {
-							item.range = toRange(entry.textEdit.range, this.editorInjection);
-						}
-						item.insertText = entry.textEdit.newText;
-					}
-					if (entry.additionalTextEdits) {
-						item.additionalTextEdits = entry.additionalTextEdits.map((v) =>
-							toTextEdit(v, this.editorInjection)
-						);
-					}
-					if (entry.insertTextFormat === cssService.InsertTextFormat.Snippet) {
-						item.insertTextRules = this.editorInjection.CompletionItemInsertTextRule.InsertAsSnippet;
-					}
-					return item;
-				});
+				} else {
+					item.range = toRange(entry.textEdit.range, this.editor);
+				}
+				item.insertText = entry.textEdit.newText;
+			}
+			if (entry.additionalTextEdits) {
+				item.additionalTextEdits = entry.additionalTextEdits.map((v) => toTextEdit(v, this.editor));
+			}
+			if (entry.insertTextFormat === cssService.InsertTextFormat.Snippet) {
+				item.insertTextRules = this.editor.CompletionItemInsertTextRule.InsertAsSnippet;
+			}
 
-				return {
-					isIncomplete: info.isIncomplete,
-					suggestions: items
-				};
-			});
+			console.log(item.range);
+
+			return item;
+		});
+
+		return {
+			incomplete: info.isIncomplete,
+			suggestions: items
+		};
 	}
 }
 
@@ -359,7 +356,7 @@ function toMarkedStringArray(
 	contents: cssService.MarkupContent | cssService.MarkedString | cssService.MarkedString[]
 ): IMarkdownString[] {
 	if (!contents) {
-		return void 0;
+		return void 0 as any;
 	}
 	if (Array.isArray(contents)) {
 		return contents.map(toMarkdownString);
@@ -370,28 +367,23 @@ function toMarkedStringArray(
 // --- hover ------
 
 export class HoverAdapter implements languages.HoverProvider {
-	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	provideHover(
+	async provideHover(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		token: CancellationToken
 	): Promise<languages.Hover> {
 		let resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.doHover(resource.toString(), fromPosition(position));
-			})
-			.then((info) => {
-				if (!info) {
-					return;
-				}
-				return <languages.Hover>{
-					range: toRange(info.range, this.editorInjection),
-					contents: toMarkedStringArray(info.contents)
-				};
-			});
+		const info = await this._worker.doHover(resource.toString(), fromPosition(position), model);
+		if (!info) {
+			return void 0 as any;
+		}
+		return <languages.Hover>{
+			range: toRange(info.range as any, this.editor),
+			contents: toMarkedStringArray(info.contents)
+		};
 	}
 }
 
@@ -414,33 +406,32 @@ function toDocumentHighlightKind(
 
 export class DocumentHighlightAdapter implements languages.DocumentHighlightProvider {
 	constructor(
-		private _worker: WorkerAccessor,
-		private editorInjection: IEditorInjection,
-		private languages: ILanguagesInjection
+		private _worker: CSSInJSWorker,
+		private languages: ILanguagesInjection,
+		private editor: IEditorInjection
 	) {}
 
-	public provideDocumentHighlights(
+	public async provideDocumentHighlights(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		token: CancellationToken
 	): Promise<languages.DocumentHighlight[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.findDocumentHighlights(resource.toString(), fromPosition(position));
-			})
-			.then((entries) => {
-				if (!entries) {
-					return;
-				}
-				return entries.map((entry) => {
-					return <languages.DocumentHighlight>{
-						range: toRange(entry.range, this.editorInjection),
-						kind: toDocumentHighlightKind(entry.kind, this.languages)
-					};
-				});
-			});
+		const entries = await this._worker.findDocumentHighlights(
+			resource.toString(),
+			fromPosition(position),
+			model
+		);
+		if (!entries) {
+			return void 0 as any;
+		}
+		return entries.map((entry) => {
+			return <languages.DocumentHighlight>{
+				range: toRange(entry.range, this.editor),
+				kind: toDocumentHighlightKind(entry.kind || 0, this.languages)
+			};
+		});
 	}
 }
 
@@ -454,34 +445,33 @@ function toLocation(location: cssService.Location, editor: IEditorInjection): la
 }
 
 export class DefinitionAdapter {
-	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	public provideDefinition(
+	public async provideDefinition(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		token: CancellationToken
 	): Promise<languages.Definition> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.findDefinition(resource.toString(), fromPosition(position));
-			})
-			.then((definition) => {
-				if (!definition) {
-					return;
-				}
-				return [toLocation(definition, this.editorInjection)];
-			});
+		const definition = await this._worker.findDefinition(
+			resource.toString(),
+			fromPosition(position),
+			model
+		);
+		if (!definition) {
+			return void 0 as any;
+		}
+		return [toLocation(definition, this.editor)];
 	}
 }
 
 // --- references ------
 
 export class ReferenceAdapter implements languages.ReferenceProvider {
-	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	provideReferences(
+	async provideReferences(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		context: languages.ReferenceContext,
@@ -489,16 +479,15 @@ export class ReferenceAdapter implements languages.ReferenceProvider {
 	): Promise<languages.Location[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.findReferences(resource.toString(), fromPosition(position));
-			})
-			.then((entries) => {
-				if (!entries) {
-					return;
-				}
-				return entries.map((v) => toLocation(v, this.editorInjection));
-			});
+		const entries = await this._worker.findReferences(
+			resource.toString(),
+			fromPosition(position),
+			model
+		);
+		if (!entries) {
+			return void 0 as any;
+		}
+		return entries.map((e) => toLocation(e, this.editor));
 	}
 }
 
@@ -506,20 +495,20 @@ export class ReferenceAdapter implements languages.ReferenceProvider {
 
 function toWorkspaceEdit(
 	edit: cssService.WorkspaceEdit,
-	editorInjection: IEditorInjection
+	editor: IEditorInjection
 ): languages.WorkspaceEdit {
 	if (!edit || !edit.changes) {
-		return void 0;
+		return void 0 as any;
 	}
 	let resourceEdits: languages.WorkspaceTextEdit[] = [];
 	for (let uri in edit.changes) {
-		const _uri = editorInjection.Uri.parse(uri);
+		const _uri = editor.Uri.parse(uri);
 		// let edits: languages.TextEdit[] = [];
 		for (let e of edit.changes[uri]) {
 			resourceEdits.push({
 				resource: _uri,
 				edit: {
-					range: toRange(e.range, editorInjection),
+					range: toRange(e.range, editor),
 					text: e.newText
 				}
 			});
@@ -531,9 +520,9 @@ function toWorkspaceEdit(
 }
 
 export class RenameAdapter implements languages.RenameProvider {
-	constructor(private _worker: WorkerAccessor, private editorInjection: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	provideRenameEdits(
+	async provideRenameEdits(
 		model: editor.IReadOnlyModel,
 		position: Position,
 		newName: string,
@@ -541,13 +530,13 @@ export class RenameAdapter implements languages.RenameProvider {
 	): Promise<languages.WorkspaceEdit> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => {
-				return worker.doRename(resource.toString(), fromPosition(position), newName);
-			})
-			.then((edit) => {
-				return toWorkspaceEdit(edit, this.editorInjection);
-			});
+		const edit = await this._worker.doRename(
+			resource.toString(),
+			fromPosition(position),
+			newName,
+			model
+		);
+		return toWorkspaceEdit(edit, this.editor);
 	}
 }
 
@@ -602,121 +591,109 @@ function toSymbolKind(
 
 export class DocumentSymbolAdapter implements languages.DocumentSymbolProvider {
 	constructor(
-		private _worker: WorkerAccessor,
+		private _worker: CSSInJSWorker,
 		private languages: ILanguagesInjection,
 		private editor: IEditorInjection
 	) {}
 
-	public provideDocumentSymbols(
+	public async provideDocumentSymbols(
 		model: editor.IReadOnlyModel,
 		token: CancellationToken
 	): Promise<languages.DocumentSymbol[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => worker.findDocumentSymbols(resource.toString()))
-			.then((items) => {
-				if (!items) {
-					return;
-				}
-				return items.map((item) => ({
-					name: item.name,
-					detail: '',
-					containerName: item.containerName,
-					kind: toSymbolKind(item.kind, this.languages),
-					tags: [],
-					range: toRange(item.location.range, this.editor),
-					selectionRange: toRange(item.location.range, this.editor)
-				}));
-			});
+		const items = await this._worker.findDocumentSymbols(resource.toString(), model);
+		if (!items) {
+			return void 0 as any;
+		}
+		return items.map((item) => ({
+			name: item.name,
+			detail: '',
+			containerName: item.containerName,
+			kind: toSymbolKind(item.kind, this.languages),
+			tags: [],
+			range: toRange(item.location.range, this.editor),
+			selectionRange: toRange(item.location.range, this.editor)
+		}));
 	}
 }
 
 export class DocumentColorAdapter implements languages.DocumentColorProvider {
-	constructor(private _worker: WorkerAccessor, private editor: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	public provideDocumentColors(
+	public async provideDocumentColors(
 		model: editor.IReadOnlyModel,
 		token: CancellationToken
 	): Promise<languages.IColorInformation[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => worker.findDocumentColors(resource.toString()))
-			.then((infos) => {
-				if (!infos) {
-					return;
-				}
-				return infos.map((item) => ({
-					color: item.color,
-					range: toRange(item.range, this.editor)
-				}));
-			});
+		const infos = await this._worker.findDocumentColors(resource.toString(), model);
+		if (!infos) {
+			return void 0 as any;
+		}
+		return infos.map((item) => ({
+			color: item.color,
+			range: toRange(item.range, this.editor)
+		}));
 	}
 
-	public provideColorPresentations(
+	public async provideColorPresentations(
 		model: editor.IReadOnlyModel,
 		info: languages.IColorInformation,
 		token: CancellationToken
 	): Promise<languages.IColorPresentation[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) =>
-				worker.getColorPresentations(resource.toString(), info.color, fromRange(info.range))
-			)
-			.then((presentations) => {
-				if (!presentations) {
-					return;
-				}
-				return presentations.map((presentation) => {
-					let item: languages.IColorPresentation = {
-						label: presentation.label
-					};
-					if (presentation.textEdit) {
-						item.textEdit = toTextEdit(presentation.textEdit, this.editor);
-					}
-					if (presentation.additionalTextEdits) {
-						item.additionalTextEdits = presentation.additionalTextEdits.map((v) =>
-							toTextEdit(v, this.editor)
-						);
-					}
-					return item;
-				});
-			});
+		const presentations = await this._worker.getColorPresentations(
+			resource.toString(),
+			info.color,
+			fromRange(info.range),
+			model
+		);
+		if (!presentations) {
+			return void 0 as any;
+		}
+		return presentations.map((presentation) => {
+			let item: languages.IColorPresentation = {
+				label: presentation.label
+			};
+			if (presentation.textEdit) {
+				item.textEdit = toTextEdit(presentation.textEdit, this.editor) as any;
+			}
+			if (presentation.additionalTextEdits) {
+				item.additionalTextEdits = presentation.additionalTextEdits.map((v) =>
+					toTextEdit(v, this.editor)
+				) as any;
+			}
+			return item;
+		});
 	}
 }
 
 export class FoldingRangeAdapter implements languages.FoldingRangeProvider {
-	constructor(private _worker: WorkerAccessor, private languages: ILanguagesInjection) {}
+	constructor(private _worker: CSSInJSWorker, private languages: ILanguagesInjection) {}
 
-	public provideFoldingRanges(
+	public async provideFoldingRanges(
 		model: editor.IReadOnlyModel,
 		context: languages.FoldingContext,
 		token: CancellationToken
 	): Promise<languages.FoldingRange[]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => worker.getFoldingRanges(resource.toString(), context))
-			.then((ranges) => {
-				if (!ranges) {
-					return;
-				}
-				return ranges.map((range) => {
-					let result: languages.FoldingRange = {
-						start: range.startLine + 1,
-						end: range.endLine + 1
-					};
-					if (typeof range.kind !== 'undefined') {
-						result.kind = toFoldingRangeKind(
-							<cssService.FoldingRangeKind>range.kind,
-							this.languages
-						);
-					}
-					return result;
-				});
-			});
+		const ranges = await this._worker.getFoldingRanges(resource.toString(), model, context);
+		if (!ranges) {
+			return void 0 as any;
+		}
+		return ranges.map((range) => {
+			let result: languages.FoldingRange = {
+				start: range.startLine + 1,
+				end: range.endLine + 1
+			};
+			if (typeof range.kind !== 'undefined') {
+				result.kind = toFoldingRangeKind(<cssService.FoldingRangeKind>range.kind, this.languages);
+			}
+			return result;
+		});
 	}
 }
 
@@ -735,29 +712,30 @@ function toFoldingRangeKind(
 }
 
 export class SelectionRangeAdapter implements languages.SelectionRangeProvider {
-	constructor(private _worker: WorkerAccessor, private editor: IEditorInjection) {}
+	constructor(private _worker: CSSInJSWorker, private editor: IEditorInjection) {}
 
-	public provideSelectionRanges(
+	public async provideSelectionRanges(
 		model: editor.IReadOnlyModel,
 		positions: Position[],
 		token: CancellationToken
 	): Promise<languages.SelectionRange[][]> {
 		const resource = model.uri;
 
-		return this._worker(resource)
-			.then((worker) => worker.getSelectionRanges(resource.toString(), positions.map(fromPosition)))
-			.then((selectionRanges) => {
-				if (!selectionRanges) {
-					return;
-				}
-				return selectionRanges.map((selectionRange) => {
-					const result: languages.SelectionRange[] = [];
-					while (selectionRange) {
-						result.push({ range: toRange(selectionRange.range, this.editor) });
-						selectionRange = selectionRange.parent;
-					}
-					return result;
-				});
-			});
+		const selectionRanges = await this._worker.getSelectionRanges(
+			resource.toString(),
+			positions.map(fromPosition),
+			model
+		);
+		if (!selectionRanges) {
+			return void 0 as any;
+		}
+		return selectionRanges.map((selectionRange) => {
+			const result: languages.SelectionRange[] = [];
+			while (selectionRange) {
+				result.push({ range: toRange(selectionRange.range, this.editor) });
+				selectionRange = selectionRange.parent as any;
+			}
+			return result;
+		});
 	}
 }

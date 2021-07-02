@@ -3,17 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { WorkerManager } from './workerManager';
-import type { CSSInJSWorker } from './cssWorker';
+import { CSSInJSWorker } from './cssWorker';
 import {
 	IEditorInjection,
 	ILanguagesInjection,
 	LanguageServiceDefaults
 } from './monaco.contribution';
 import * as languageFeatures from './languageFeatures';
-import { Uri, IDisposable, languages } from './fillers/monaco-editor-core';
+import { Uri, IDisposable } from './fillers/monaco-editor-core';
 
 export function setupMode(
+	worker: CSSInJSWorker,
 	defaults: LanguageServiceDefaults,
 	editor: IEditorInjection,
 	languages: ILanguagesInjection
@@ -21,15 +21,9 @@ export function setupMode(
 	const disposables: IDisposable[] = [];
 	const providers: IDisposable[] = [];
 
-	const client = new WorkerManager(defaults, editor);
-	disposables.push(client);
-
-	const worker: languageFeatures.WorkerAccessor = (...uris: Uri[]): Promise<CSSInJSWorker> => {
-		return client.getLanguageServiceWorker(...uris);
-	};
-
 	function registerProviders(): void {
 		const { languageId, modeConfiguration } = defaults;
+		console.log(modeConfiguration);
 
 		disposeAll(providers);
 
@@ -53,7 +47,7 @@ export function setupMode(
 			providers.push(
 				languages.registerDocumentHighlightProvider(
 					languageId,
-					new languageFeatures.DocumentHighlightAdapter(worker, editor, languages)
+					new languageFeatures.DocumentHighlightAdapter(worker, languages, editor)
 				)
 			);
 		}
@@ -105,9 +99,7 @@ export function setupMode(
 				)
 			);
 		}
-		if (modeConfiguration.diagnostics) {
-			providers.push(new languageFeatures.DiagnosticsAdapter(languageId, worker, defaults, editor));
-		}
+
 		if (modeConfiguration.selectionRanges) {
 			providers.push(
 				languages.registerSelectionRangeProvider(

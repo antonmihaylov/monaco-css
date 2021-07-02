@@ -6,6 +6,7 @@
 /// <reference path="node_modules/monaco-editor-core/monaco.d.ts" />
 
 declare namespace monaco.languages.css {
+	type IEditor = editor.IEditor;
 	export interface IEditorInjection {
 		createWebWorker: typeof editor.createWebWorker;
 		setModelMarkers: typeof editor.setModelMarkers;
@@ -140,10 +141,18 @@ declare namespace monaco.languages.css {
 	export type DiagnosticsOptions = Options;
 	export const cssInJsDefaults: (editor: IEditorInjection) => LanguageServiceDefaults;
 	export const setupCssInJsLang: (
+		worker: CSSInJSWorker,
 		languages: ILanguagesInjection,
 		editor: IEditorInjection,
 		defaults?: LanguageServiceDefaults
 	) => void;
+	export const setupValidation: (
+		worker: CSSInJSWorker,
+		editor: IEditor,
+		editorInjection: IEditorInjection,
+		defaults?: LanguageServiceDefaults
+	) => void;
+	export { CSSInJSWorker };
 	export interface CSSDataConfiguration {
 		/**
 		 * Defines whether the standard CSS properties, at-directives, pseudoClasses and pseudoElements are shown.

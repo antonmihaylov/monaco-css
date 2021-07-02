@@ -12,7 +12,7 @@ helpers.packageESM({
 	repoRoot: REPO_ROOT,
 	esmSource: 'out/esm',
 	esmDestination: 'release/esm',
-	entryPoints: ['monaco.contribution.js', 'cssMode.js', 'css.worker.js'],
+	entryPoints: ['monaco.contribution.js', 'cssMode.js'],
 	resolveAlias: {
 		'vscode-nls': path.join(REPO_ROOT, 'out/esm/fillers/vscode-nls.js')
 	},

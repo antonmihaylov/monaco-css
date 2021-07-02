@@ -5,7 +5,6 @@
 
 import * as mode from './cssMode';
 import * as cssInJsLang from './cssInJsLang';
-import { language } from './cssInJsLang';
 import {
 	languages,
 	editor,
@@ -15,6 +14,11 @@ import {
 	Emitter,
 	Range
 } from './fillers/monaco-editor-core';
+import * as cssMode from './cssMode';
+import { CSSInJSWorker } from './cssWorker';
+import { DiagnosticsAdapter, WorkerAccessor } from './languageFeatures';
+
+type IEditor = editor.IEditor;
 
 //  Inject monaco editor and languages references at runtime instead of importing, because we don't want to import the css files
 export interface IEditorInjection {
@@ -267,6 +271,7 @@ function getMode(): Promise<typeof mode> {
 }
 
 export const setupCssInJsLang = (
+	worker: CSSInJSWorker,
 	languages: ILanguagesInjection,
 	editor: IEditorInjection,
 	defaults: LanguageServiceDefaults = null
@@ -284,8 +289,25 @@ export const setupCssInJsLang = (
 	languages.setMonarchTokensProvider(languageId, cssInJsLang.language as any);
 	languages.setLanguageConfiguration(languageId, cssInJsLang.conf as any);
 
-	getMode().then((mode) => mode.setupMode(defaults, editor, languages));
+	cssMode.setupMode(worker, defaults, editor, languages);
 };
+
+export const setupValidation = (
+	worker: CSSInJSWorker,
+	editor: IEditor,
+	editorInjection: IEditorInjection,
+	defaults: LanguageServiceDefaults = null
+) => {
+	if (!defaults) {
+		defaults = cssInJsDefaults(editorInjection);
+	}
+
+	const wa: WorkerAccessor = () => Promise.resolve(worker);
+
+	new DiagnosticsAdapter(defaults.languageId, editor, worker, editorInjection);
+};
+
+export { CSSInJSWorker };
 
 // languages.onLanguage('less', () => {
 // 	getMode().then((mode) => mode.setupMode(lessDefaults));
