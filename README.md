@@ -7,7 +7,7 @@ Fork of the CSS, LESS and SCSS plugin for the Monaco Editor, providing support f
 monaco-css by default can't handle css-in-js syntax, where css properties are written at the root level, without a selector.
 This modification adds a small proxy between the input document and the scss language service, so that input gets transformed like this:
 
-*Input (valid css-in-js, but invalid css)*
+*Input (valid css-in-js, but invalid css/scss)*
 ```scss
 background: red;
 
@@ -16,7 +16,7 @@ div {
 }
 ```
 
-*Gets passed down to the language service as this (valid css)*
+*Gets passed down to the language service as this (valid scss)*
 ```scss
 .this-element {
  background: red;
