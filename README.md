@@ -1,6 +1,6 @@
 # Monaco CSS-in-JS
 
-Fork of the CSS, LESS and SCSS plugin for the Monaco Editor, providing support for CSS-in-JS (styled components, emotion). It is intended to be used with monaco-react
+Fork of the CSS, LESS and SCSS plugin for the Monaco Editor, providing support for CSS-in-JS (styled components, emotion). It is intended to be used with [monaco-react](https://www.npmjs.com/package/@monaco-editor/react). 
 
 ## Overview
 
