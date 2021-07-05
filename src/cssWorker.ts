@@ -204,8 +204,10 @@ export class CSSInJSWorker {
 	}
 
 	private _getTextDocument(uri: string, model: editor.IReadOnlyModel): cssService.TextDocument {
+		if (!model) return null;
+
 		const value = `.this-element {
-		 ${model?.getValue() || ''}
+		 ${model.getValue() || ''}
 		}`;
 
 		return cssService.TextDocument.create(uri, 'emotionCss', model.getVersionId(), value);
